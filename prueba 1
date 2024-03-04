@@ -1,0 +1,1271 @@
+function correr() {
+//Cargar todas las hojas en memoria
+  var valoresdetOP=SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Detalle - OP').getDataRange().getValues();
+    var valoresdetOPvalidos=[];
+  var valoresDataConci=SpreadsheetApp.openById('19hyng0RrYLQsMFqb6xu4gJrpQDxDROh3qzkCd93MnMU').getSheetByName("ExtractMacConci").getRange("A1:Ao3000").getValues();
+  var valoresDataConcilimpia=valoresDataConci;
+    var valoresMerchant=[];
+    var valoresEnduser=[];
+  var valoresdetTranxJefes=SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Detalle - Tranx jefes').getDataRange().getValues();
+  var valoresdetDA=SpreadsheetApp.openById('1qdeGiSLYqQ6M4sSf2FTGpRKwrNKfzzSXVCfiwazPAcs').getSheetByName("1.1 Reporte_Seguimiento_solicitudes(DA)").getRange("A4:Ay3004").getValues();
+  var valoresdetRC=SpreadsheetApp.openById('1qdeGiSLYqQ6M4sSf2FTGpRKwrNKfzzSXVCfiwazPAcs').getSheetByName("1.2 Reporte_Reversas_Seguimiento(RC)").getRange("A4:Ap3004").getValues();
+
+//  var valoresdetDA=SpreadsheetApp.getActiveSpreadsheet().getSheetByName('DA').getDataRange().getValues();
+//  var valoresdetRC=SpreadsheetApp.getActiveSpreadsheet().getSheetByName('RC').getDataRange().getValues();
+  var valoresCabeceraMerchant=SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Cabecera - Merchant').getDataRange().getValues();
+  var valoresDetalleMerchant=SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Detalle - Merchant').getDataRange().getValues();
+  var valoresDetalleUsuarioval=SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Detalle Valido - Usuario').getDataRange().getValues();
+  var valoresDetalleUsuarioobs=SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Detalle Obs - Usuario').getDataRange().getValues();
+
+  //cargar las fechas
+  var fechainicio=SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Periodo a conciliar').getRange(3,3).getValue();
+  var fechafin=SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Periodo a conciliar').getRange(4,3).getValue();
+  
+//Funciones
+  //Funcion para comparar
+    function comparaOPvsBD(arreglo, indiceColumna) {
+      return arreglo.map(function(fila) {
+      return fila[indiceColumna];
+      });
+    }
+  //Funcion para saber si son iguales   
+      function conjuntosSonIguales(conjunto1, conjunto2) {
+        if (conjunto1.size !== conjunto2.size) {
+          return false;
+        }
+        for (var elemento of conjunto1) {
+          if (!conjunto2.has(elemento)) {
+            return false;
+          }
+        }
+        return true;
+      }
+  //Funcion para filtrar por fechas
+      function filtrarPorFechas(valores, columnaFecha, rangoFechaInicio, rangoFechaFin) {
+        var valoresFiltrados = [valores[0]]; // Mantener la primera fila (cabecera)
+        for (var i = 1; i < valores.length; i++) {
+          var fechaActual = Utilities.formatDate(new Date(valores[i][columnaFecha]), "GMT", "dd/MM/yyyy");
+          if (fechaActual >= rangoFechaInicio && fechaActual <= rangoFechaFin) {
+            valoresFiltrados.push(valores[i]);
+          }
+        }
+        return valoresFiltrados;
+      }
+  //funcion para agregar registros a un arreglo solo con los valores de otro que no se encuentran
+      function agregarRegistros(arreglo1, arreglo2) {
+        for (var i = 0; i < arreglo2.length; i++) {
+          arreglo1.push(arreglo2[i]);
+        }
+      }
+  //funcion para buscar llaves secundarias y llaves primarios , darc
+      function actualizarArregloda(arreglo1, arreglo2) {
+        arreglo2.forEach(function(registro) {
+          var indiceArreglo1 = arreglo1.findIndex(function(elemento) {
+            return elemento[0] == registro[15];
+          });
+          if (indiceArreglo1 !== -1) {
+            var nuevasLlavesSecundarias = arreglo2.filter(function(item) {
+              return item[15] == registro[15];
+            }).map(function(item) {
+              return item[13];
+            }).map(function(valor) {
+              var elementosCoincidentes = arreglo2.filter(function(elemento) {
+                return elemento[13] === valor;
+              });
+              var valoresColumna15 = elementosCoincidentes.map(function(elemento) {
+                return elemento[15];
+              });
+              return valoresColumna15;
+            }).flat(); 
+            nuevasLlavesSecundarias.forEach(function(llaveSecundaria) {
+              var existe = arreglo1.some(function(elemento) { 
+                return elemento[0] == llaveSecundaria; });
+              if (!existe) {
+                arreglo1.push([llaveSecundaria, arreglo1[indiceArreglo1][1]]);
+              }
+            }); 
+          }; 
+        });
+                return arreglo1;
+      }
+
+  //funcion para realizar la busqueda en da y comparar y mostrar mensajes
+    function compararListada(valoresdetDALista1, valoresDataConcilimpia, valoresConcixfechas, mensajes2,a) {
+      // Extraer columnas para buscar otros id
+        var columnasExtraidas1 = valoresdetDALista1.map(function(fila) {
+          return [fila[19], fila[2]]; // Extrae las columnas 3 y 6 (índices 2 y 5)
+        }).slice(1);
+        columnasExtraidas1 = actualizarArregloda(columnasExtraidas1, valoresDataConcilimpia); 
+      // Obtener los valores de las columnas de jefes
+        var valoresColumnaArreglo1 = columnasExtraidas1.map(function(fila) {
+            return fila[0]; // Supongo que la columna de interés en arreglo1 es la columna 1
+        }); 
+      // Valores de la columna adicional
+        var valoresColumnaestadoAdicional = columnasExtraidas1.map(function(fila) {
+            return fila[1]; // Supongo que la columna adicional está en la columna 20
+        }); 
+      // Obtener los valores de las columna de Conciliacion
+        var valoresColumnaArreglo2 = valoresConcixfechas.map(function(fila) {
+            return fila[15]; // Supongo que la columna de interés en arreglo2 es la columna 4
+        }).slice(1); 
+      // Encuentro los valores que no coinciden
+        var valoresFiltradosCruceda = valoresColumnaArreglo1.filter(function(valor) {
+            return !valoresColumnaArreglo2.includes(valor);
+        });
+        var valoresCoincidentesda = valoresColumnaArreglo1.filter(function(valor) {
+            return valoresColumnaArreglo2.includes(valor);
+        });
+      //coparacion IF
+        if (valoresFiltradosCruceda.length > 0) {
+          var valoresFiltro = valoresFiltradosCruceda.map(function(valor, indice) {
+            return [valor, valoresColumnaestadoAdicional[indice]]; // Agregar el valor adicional correspondiente
+          });         
+          var arregloFiltrado = valoresDataConcilimpia.filter(function(fila) {
+            return valoresFiltro.some(function(valores) {
+              return valores[0] === fila[15]; // Suponiendo que deseas comparar con la primera columna de arreglo2
+            });
+          });
+          var nuevaVariable;
+          arregloFiltrado.forEach(function(registro) {
+            var columnaAdicional = valoresFiltro[0][1];
+            nuevaVariable = columnaAdicional; 
+            registro.push("DA_Agregado");
+          });
+          agregarRegistros(valoresConcixfechas, arregloFiltrado);
+          var ultimaFila = valoresConcixfechas[valoresConcixfechas.length - 1];
+          ultimaFila[17] = nuevaVariable;
+          mensajes2.push(['Valores agregados del reporte base de DARC-DA:']);
+          mensajes2 = mensajes2.concat(valoresFiltradosCruceda.map(function(valor) {
+            return [valor]; // Envuelve cada mensaje en un array interno
+          }));
+                 
+        }
+        if (valoresCoincidentesda.length > 0) {             
+            var valoresCoincidentesda = valoresCoincidentesda.map(function(valor, indice) {
+              return [valor, valoresColumnaestadoAdicional[indice]]; 
+            });
+            valoresCoincidentesda.forEach(function(valorArreglo3) {
+              var indiceEnArreglo2 = valoresConcixfechas.findIndex(function(fila) {
+                return fila[15] == valorArreglo3[0]; // Suponiendo que la columna de interés en el arreglo 2 es la columna 1
+              });
+              if (indiceEnArreglo2 !== -1) {
+                var valorColumna3Arreglo2 = valorArreglo3[1]; // Suponiendo que la columna 3 en el arreglo 2 es la columna 3
+                var valorColumna8Arreglo2 = "DA_actualizado"; // Suponiendo que la columna 8 en el arreglo 2 es la columna 8
+                valoresConcixfechas[indiceEnArreglo2][17] = valorColumna3Arreglo2;
+                valoresConcixfechas[indiceEnArreglo2][41] = valorColumna8Arreglo2;
+              }
+            });
+            mensajes2.push(['Valores actualizados segun el reporte de DARC-DA:']);
+            mensajes2 = mensajes2.concat(valoresCoincidentesda.map(function(valor) {
+              return [valor]; // Envuelve cada mensaje en un array interno
+            }));
+        }
+        return [valoresConcixfechas, mensajes2];
+    }
+
+  //funcion para realizar la busqueda en RC y comparar y mostrar mensajes
+    function compararListadrc(valoresdetrcLista1, valoresDataConcilimpia, valoresConcixfechas, mensajes3) {
+      // Extraer columnas para buscar otros id
+        var columnasExtraidas1 = valoresdetrcLista1.map(function(fila) {
+          return [fila[14], fila[2]]; // Extrae las columnas 3 y 6 (índices 2 y 5)
+        }).slice(1);  
+      // Obtener los valores de las columnas de jefes
+        var valoresColumnaArreglo1 = columnasExtraidas1.map(function(fila) {
+            return fila[0]; // Supongo que la columna de interés en arreglo1 es la columna 1
+        }); 
+      // Valores de la columna adicional
+        var valoresColumnaestadoAdicional = columnasExtraidas1.map(function(fila) {
+            return fila[1]; // Supongo que la columna adicional está en la columna 20
+        }); 
+      // Obtener los valores de las columna de Conciliacion
+        var valoresColumnaArreglo2 = valoresConcixfechas.map(function(fila) {
+            return fila[15]; // Supongo que la columna de interés en arreglo2 es la columna 4
+        }).slice(1); 
+      // Encuentro los valores que no coinciden
+        var valoresFiltradosCruceda = valoresColumnaArreglo1.filter(function(valor) {
+            return !valoresColumnaArreglo2.includes(valor);
+        });      
+        var valoresCoincidentesda = valoresColumnaArreglo1.filter(function(valor) {
+            return valoresColumnaArreglo2.includes(valor);
+        });
+      //comparo  
+        if (valoresFiltradosCruceda.length > 0) {
+            var valoresFiltro = valoresFiltradosCruceda.map(function(valor, indice) {
+              return [valor, valoresColumnaestadoAdicional[indice]]; // Agregar el valor adicional correspondiente
+            });
+            var arregloFiltrado = valoresDataConcilimpia.filter(function(fila) {
+              return valoresFiltro.some(function(valores) {
+                return valores[0] === fila[15]; // Suponiendo que deseas comparar con la primera columna de arreglo2
+              });
+            });
+            var nuevaVariable;
+            arregloFiltrado.forEach(function(registro) {
+              var columnaAdicional = valoresFiltro[0][1];  
+              nuevaVariable = columnaAdicional;            
+              registro.push("RC_Agregado");
+            });
+            agregarRegistros(valoresConcixfechas, arregloFiltrado);
+            var ultimaFila = valoresConcixfechas[valoresConcixfechas.length - 1];
+            ultimaFila[17] = nuevaVariable;
+
+            mensajes3.push(['Valores agregados del reporte de DARC-RC:']);
+            mensajes3 = mensajes3.concat(valoresFiltradosCruceda.map(function(valor) {
+              return [valor]; // Envuelve cada mensaje en un array interno
+            }));
+        }
+        if (valoresCoincidentesda.length > 0) {                        
+            var valoresCoincidentesda = valoresCoincidentesda.map(function(valor, indice) {
+              return [valor, valoresColumnaestadoAdicional[indice]]; 
+            });            
+            valoresCoincidentesda.forEach(function(valorArreglo3) {
+              var indiceEnArreglo2 = valoresConcixfechas.findIndex(function(fila) {
+                return fila[15] == valorArreglo3[0]; // Suponiendo que la columna de interés en el arreglo 2 es la columna 1
+              });
+              if (indiceEnArreglo2 !== -1) {
+                var valorColumna3Arreglo2 = valorArreglo3[1]; // Suponiendo que la columna 3 en el arreglo 2 es la columna 3
+                var valorColumna8Arreglo2 = "RC_actualizado"; // Suponiendo que la columna 8 en el arreglo 2 es la columna 8
+                valoresConcixfechas[indiceEnArreglo2][17] = valorColumna3Arreglo2;
+                valoresConcixfechas[indiceEnArreglo2][41] = valorColumna8Arreglo2;
+              }
+            });
+            mensajes3.push(['Valores actualizados segun el reporte de DARC-RC:']);
+            mensajes3 = mensajes3.concat(valoresCoincidentesda.map(function(valor) {
+              return [valor]; // Envuelve cada mensaje en un array interno
+            }));
+        }
+        return [valoresConcixfechas, mensajes3];
+    }
+  //funcion para agregar registros de Op
+    function compararListaOP(valoresdetOPvalidos, valoresConcixfechas, mensajes4) {
+        valoresdetOPvalidos=valoresdetOPvalidos.slice(1);
+        cabecera= valoresConcixfechas[0]; // Usa la primera fila como cabecera
+        var valoresConcixfechas = valoresConcixfechas.slice(1);
+    
+      // Extraer columnas para buscar otros id
+        var columnasExtraidas1 = valoresdetOPvalidos.map(function(fila) {
+          return [fila[0], fila[5]]; // Extrae las columnas 3 y 6 (índices 2 y 5)
+        }).slice(1);
+      // Obtener los valores de las columnas de jefes
+        var valoresColumnaArreglo1 = columnasExtraidas1.map(function(fila) {
+            return fila[0]; // Supongo que la columna de interés en arreglo1 es la columna 1
+        }); 
+      // Obtener los valores de las columna de Conciliacion
+        var valoresColumnaArreglo2 = valoresConcixfechas.map(function(fila) {
+            return fila[0]; // Supongo que la columna de interés en arreglo2 es la columna 4
+        }).slice(1); 
+      // Encuentro los valores que no coinciden
+        var valoresFiltradosCruceda = valoresColumnaArreglo1.filter(function(valor) {
+            return !valoresColumnaArreglo2.includes(valor);
+        });
+        var valoresCoincidentesda = valoresColumnaArreglo1.filter(function(valor) {
+            return valoresColumnaArreglo2.includes(valor);
+        });
+
+      // comparar con los if 
+        if (valoresFiltradosCruceda.length > 0) {
+          var sinvaloresOP=valoresFiltradosCruceda
+            mensajes4.push(['Valores de OP que no existen en la base:']);
+            mensajes4 = mensajes4.concat(valoresFiltradosCruceda.map(function(valor) {
+              return [valor]; // Envuelve cada mensaje en un array interno
+            }));
+        }
+        if (valoresCoincidentesda.length > 0) {                        
+            var valoresCoincidentesda = valoresCoincidentesda.map(function(valor, indice) {
+              return [valor, valoresdetOPvalidos[indice][5]];
+            });            
+            valoresCoincidentesda.forEach(function(valorArreglo3) {
+              var indiceEnArreglo2 = valoresConcixfechas.findIndex(function(fila) {
+                return fila[0] == valorArreglo3[0]; // Suponiendo que la columna de interés en el arreglo 2 es la columna 1
+              });
+              if (indiceEnArreglo2 !== -1) {
+                var valorColumna3Arreglo2 = valorArreglo3[1]; // Suponiendo que la columna 3 en el arreglo 2 es la columna 3
+                var valorColumna8Arreglo2 = "OP_actualizado"; // Suponiendo que la columna 8 en el arreglo 2 es la columna 8
+                valoresConcixfechas[indiceEnArreglo2][17] = valorColumna3Arreglo2;
+                valoresConcixfechas[indiceEnArreglo2][41] = valorColumna8Arreglo2;
+
+              }
+            });
+            mensajes4.push(['Valores actualizados segun el reporte de DARC-RC:']);
+            mensajes4 = mensajes4.concat(valoresCoincidentesda.map(function(valor) {
+              return [valor]; // Envuelve cada mensaje en un array interno
+            }));
+        }
+        var valoresConcixfechas = [cabecera].concat(valoresConcixfechas);
+        return [valoresConcixfechas, mensajes4,sinvaloresOP];
+    }  
+  //funcion para armar los reportes finales
+    //reporte de merchant
+      function generarMerch(arregloBidimensional) {
+        // Iterar sobre cada fila del arreglo bidimensional
+          var nuevo=[];
+          var fila1 = [];
+          for (var i = 0; i < arregloBidimensional.length; i++) {
+            var fila = arregloBidimensional[i];
+            // Obtener el tipo de estado de la columna 5 (índice 4)
+              var tipoEstado = fila[17];
+            // Obtener otros valores de la fila y asignarlos a variables
+              var idop = fila[0]; 
+              var loanid = fila[1];
+              var merchantid = fila[2]; 
+              var servicioa = fila[5]; 
+              var merchantreference = fila[7]; 
+              var transactionid = fila[8]; 
+              var montocredito = fila[9]; 
+              var fechadeloan = fila[11]; 
+              var referenceloan= fila[13]; 
+              var montoprepago = fila[16];
+              var fechaprepayment = fila[20]; 
+              var fvenccredito= fila[22]; 
+              var dni= fila[24]; 
+              var nombre= fila[25];
+              var email= fila[26]; 
+              var comisionmerchant = fila[27]; 
+              var montocomisionmerchant = fila[29];
+              var capitaleu= fila[37]; 
+              var comisioneu = fila[38]; 
+              var taxeu = fila[39]; 
+              var ncuotas = fila[40];
+              var comentario1 = fila[41];
+                //var ruc = fila[3]; 
+                //var rs = fila[4]; 
+                //var canal = fila[6]; 
+                //var loanstatus = fila[10];
+                //var fechacreditocast = fila[12]; 
+                //var prepaymentid = fila[14]; 
+                //var prepaymentreference = fila[15]; 
+                //var plancuotas = fila[18]; 
+                //var tipo = fila[19]; 
+                //var fechapagocast = fila[21]; 
+                //var idusuario= fila[23]; 
+                //var taxmerchant = fila[28];  
+                //var montotaxmerchant = fila[30];
+                //var comisionopenpay= fila[31]; 
+                //var taxopenpay = fila[32]; 
+                //var periodo = fila[33]; 
+                //var iddevolucion = fila[34];
+                //var devolucionreference = fila[35];
+                //var fechadevolucion = fila[36]; 
+                //var tipoCuota = fila[42]; 
+
+            // comparar
+              switch (tipoEstado) {
+                case "completed":
+                  //order de las columnas y colocar en una fila
+                    var id_liquidacion=" "; fila1.push(id_liquidacion);//1
+                    var id_liquidacion_detalle=" "; fila1.push(id_liquidacion_detalle);//2
+                    var fecha_conciliacion=" "; fila1.push(fecha_conciliacion);//3
+                    var servicio=servicioa; fila1.push(servicio);//4
+                    var merchant_reference=merchantreference; fila1.push(merchant_reference);//5
+                    var id_comercio=merchantid; fila1.push(id_comercio);//6
+                    var id_credito=loanid; fila1.push(id_credito);//7
+                    var id_transaccion=transactionid; fila1.push(id_transaccion);//8
+                    var fecha_vencimiento_credito=fvenccredito; fila1.push(fecha_vencimiento_credito);//9
+                    var loan_reference=referenceloan; fila1.push(loan_reference);//10
+                    var glosa='ID Compra '+referenceloan+' - '+ncuotas+' cuotas'; fila1.push(glosa);//11
+                    var moneda="Pen"; fila1.push(moneda);//12
+                    var total_credito=montocredito; fila1.push(total_credito);//13
+                    var n_cuotas=ncuotas; fila1.push(n_cuotas);//14
+                    var comision_asignada=montocomisionmerchant; fila1.push(comision_asignada);//15
+                    var comision_sin_iva=total_credito * comisionmerchant; fila1.push(comision_sin_iva);//16
+                    var iva=comision_sin_iva*0.18; fila1.push(iva);//17
+                    var comision_con_iva=comision_sin_iva+iva; fila1.push(comision_con_iva);//18
+                    var estadocredito="PAGADO"; fila1.push(estadocredito);//19
+                    var fechaemision=fechadeloan; fila1.push(fechaemision);//20
+                    var fechacancelacion=fechaprepayment; fila1.push(fechacancelacion);//21
+                    var importe_transferir=montocredito-comision_con_iva; fila1.push(importe_transferir);//22
+                    var estado_conciliacion=" "; fila1.push(estado_conciliacion);//23
+                    var dni_end_user=dni; fila1.push(dni_end_user);//24
+                    var nombre_end_user=nombre; fila1.push(nombre_end_user);//25
+                    var mail_del_end_user=email; fila1.push(mail_del_end_user);//26 
+                    var monto_total_pago=montoprepago; fila1.push(monto_total_pago);//27
+                    var monto_capital_pago=capitaleu; fila1.push(monto_capital_pago);//28
+                    var monto_comision_end_user=comisioneu; fila1.push(monto_comision_end_user);//29
+                    var monto_impuesto_end_user=taxeu; fila1.push(monto_impuesto_end_user);//30
+
+                  // agregar la nueva fila en el arreglo
+                    nuevo.push(fila1); 
+                  break;
+                case "Anulación":
+                  //primero se registra el positivo
+                    var id_liquidacion=" "; fila1.push(id_liquidacion);//1
+                    var id_liquidacion_detalle=" "; fila1.push(id_liquidacion_detalle);//2
+                    var fecha_conciliacion=" "; fila1.push(fecha_conciliacion);//3
+                    var servicio=servicioa; fila1.push(servicio);//4
+                    var merchant_reference=merchantreference; fila1.push(merchant_reference);//5
+                    var id_comercio=merchantid; fila1.push(id_comercio);//6
+                    var id_credito=loanid; fila1.push(id_credito);//7
+                    var id_transaccion=transactionid; fila1.push(id_transaccion);//8
+                    var fecha_vencimiento_credito=fvenccredito; fila1.push(fecha_vencimiento_credito);//9
+                    var loan_reference=referenceloan; fila1.push(loan_reference);//10
+                    var glosa='ID Compra '+referenceloan+' - '+ncuotas+' cuotas'; fila1.push(glosa);//11
+                    var moneda="Pen"; fila1.push(moneda);//12
+                    var total_credito=montocredito; fila1.push(total_credito);//13
+                    var n_cuotas=ncuotas; fila1.push(n_cuotas);//14
+                    var comision_asignada=montocomisionmerchant; fila1.push(comision_asignada);//15
+                    var comision_sin_iva=total_credito * comisionmerchant; fila1.push(comision_sin_iva);//16
+                    var iva=comisionSinIva*0.18; fila1.push(iva);//17
+                    var comision_con_iva=comisionSinIva+iva; fila1.push(comision_con_iva);//18
+                    var estadocredito="PAGADO"; fila1.push(estadocredito);//19
+                    var fechaemision=fechadeloan; fila1.push(fechaemision);//20
+                    var fechacancelacion=fechaprepayment; fila1.push(fechacancelacion);//21
+                    var importe_transferir=montocredito-comision_con_iva; fila1.push(importe_transferir);//22
+                    var estado_conciliacion=" "; fila1.push(estado_conciliacion);//23
+                    var dni_end_user=dni; fila1.push(dni_end_user);//24
+                    var nombre_end_user=nombre; fila1.push(nombre_end_user);//25
+                    var mail_del_end_user=email; fila1.push(mail_del_end_user);//26
+                    var monto_total_pago=montoprepago; fila1.push(monto_total_pago);//27
+                    var monto_capital_pago=capitaleu; fila1.push(monto_capital_pago);//28
+                    var monto_comision_end_user=comisioneu; fila1.push(monto_comision_end_user);//29
+                    var monto_impuesto_end_user=taxeu; fila1.push(monto_impuesto_end_user);//30
+                    nuevo.push(fila1); 
+                  // Luego se registra el negativo
+                    var id_liquidacion=" "; fila1.push(id_liquidacion);
+                    var id_liquidacion_detalle=" "; fila1.push(id_liquidacion_detalle);
+                    var fecha_conciliacion=" "; fila1.push(fecha_conciliacion);
+                    var servicio=servicioa; fila1.push(servicio);
+                    var merchant_reference=merchantreference; fila1.push(merchant_reference);
+                    var id_comercio=merchantid; fila1.push(id_comercio);
+                    var id_credito=loanid; fila1.push(id_credito);
+                    var id_transaccion=transactionid; fila1.push(id_transaccion);
+                    var fecha_vencimiento_credito=fvenccredito; fila1.push(fecha_vencimiento_credito);
+                    var loan_reference=referenceloan; fila1.push(loan_reference);
+                    var glosa='ID Compra '+referenceloan+' - '+ncuotas+' cuotas'; fila1.push(glosa);
+                    var moneda="Pen"; fila1.push(moneda);
+                    var total_credito=montocredito*-1; fila1.push(total_credito);
+                    var n_cuotas=ncuotas; fila1.push(n_cuotas);
+                    var comision_asignada=montocomisionmerchant; fila1.push(comision_asignada);
+                    var comision_sin_iva=total_credito * comisionmerchant; fila1.push(comision_sin_iva);
+                    var iva=comision_sin_iva*0.18; fila1.push(iva);
+                    var comision_con_iva=comision_sin_iva+iva; fila1.push(comision_con_iva);
+                    var estadocredito="REVERSADO_ANUL"; fila1.push(estadocredito);
+                    var fechaemision=fechadeloan; fila1.push(fechaemision);
+                    var fechacancelacion=fechaprepayment; fila1.push(fechacancelacion);
+                    var importe_transferir=total_credito+comision_con_iva; fila1.push(importe_transferir);
+                    var estado_conciliacion=" "; fila1.push(estado_conciliacion);
+                    var dni_end_user=dni; fila1.push(dni_end_user);
+                    var nombre_end_user=nombre; fila1.push(nombre_end_user);
+                    var mail_del_end_user=email; fila1.push(mail_del_end_user);
+                    var monto_total_pago=montoprepago; fila1.push(monto_total_pago);
+                    var monto_capital_pago=capitaleu; fila1.push(monto_capital_pago);
+                    var monto_comision_end_user=comisioneu; fila1.push(monto_comision_end_user);
+                    var monto_impuesto_end_user=taxeu; fila1.push(monto_impuesto_end_user);
+                    nuevo.push(fila1);                     
+                  break;
+                case "Devolución":
+                  //primero se registra el registro positivo
+                    if(comentario1=="RC_actualizado" || comentario1=="DA_actualizado" ){
+                      var id_liquidacion=" "; fila1.push(id_liquidacion);//1
+                      var id_liquidacion_detalle=" "; fila1.push(id_liquidacion_detalle);//2
+                      var fecha_conciliacion=" "; fila1.push(fecha_conciliacion);//3
+                      var servicio=servicioa; fila1.push(servicio);//4
+                      var merchant_reference=merchantreference; fila1.push(merchant_reference);//5
+                      var id_comercio=merchantid; fila1.push(id_comercio);//6
+                      var id_credito=loanid; fila1.push(id_credito);//7
+                      var id_transaccion=transactionid; fila1.push(id_transaccion);//8
+                      var fecha_vencimiento_credito=fvenccredito; fila1.push(fecha_vencimiento_credito);//9
+                      var loan_reference=referenceloan; fila1.push(loan_reference);//10
+                      var glosa='ID Compra '+referenceloan+' - '+ncuotas+' cuotas'; fila1.push(glosa);//11
+                      var moneda="Pen"; fila1.push(moneda);//12
+                      var total_credito=montocredito; fila1.push(total_credito);//13
+                      var n_cuotas=ncuotas; fila1.push(n_cuotas);//14
+                      var comision_asignada=montocomisionmerchant; fila1.push(comision_asignada);//15
+                      var comision_sin_iva=total_credito * comisionmerchant; fila1.push(comision_sin_iva);//16
+                      var iva=comisionSinIva*0.18; fila1.push(iva);//17
+                      var comision_con_iva=comisionSinIva+iva; fila1.push(comision_con_iva);//18
+                      var estadocredito=PAGADO; fila1.push(estadocredito);//19
+                      var fechaemision=fechadeloan; fila1.push(fechaemision);//20
+                      var fechacancelacion=fechaprepayment; fila1.push(fechacancelacion);//21
+                      var importe_transferir=montocredito-comision_con_iva; fila1.push(importe_transferir);//22
+                      var estado_conciliacion=" "; fila1.push(estado_conciliacion);//23
+                      var dni_end_user=dni; fila1.push(dni_end_user);//24
+                      var nombre_end_user=nombre; fila1.push(nombre_end_user);//25
+                      var mail_del_end_user=email; fila1.push(mail_del_end_user);//26 
+                      var monto_total_pago=montoprepago; fila1.push(monto_total_pago);//27
+                      var monto_capital_pago=capitaleu; fila1.push(monto_capital_pago);//28
+                      var monto_comision_end_user=comisioneu; fila1.push(monto_comision_end_user);//29
+                      var monto_impuesto_end_user=taxeu; fila1.push(monto_impuesto_end_user);//30
+                      nuevo.push(fila1);
+                    }
+                    
+                  //luego se registra el negativo
+                    if(comentario1=="RC_actualizado" || comentario1=="DA_actualizado" ){
+                      var id_liquidacion=" "; fila1.push(id_liquidacion);
+                      var id_liquidacion_detalle=" "; fila1.push(id_liquidacion_detalle);
+                      var fecha_conciliacion=" "; fila1.push(fecha_conciliacion);
+                      var servicio=servicioa; fila1.push(servicio);
+                      var merchant_reference=merchantreference; fila1.push(merchant_reference);
+                      var id_comercio=merchantid; fila1.push(id_comercio);
+                      var id_credito=loanid; fila1.push(id_credito);
+                      var id_transaccion=transactionid; fila1.push(id_transaccion);
+                      var fecha_vencimiento_credito=fvenccredito; fila1.push(fecha_vencimiento_credito);
+                      var loan_reference=referenceloan; fila1.push(loan_reference);
+                      var glosa='ID Compra '+referenceloan+' - '+ncuotas+' cuotas'; fila1.push(glosa);
+                      var moneda="Pen"; fila1.push(moneda);
+                      var total_credito=montocredito*-1; fila1.push(total_credito);
+                      var n_cuotas=ncuotas; fila1.push(n_cuotas);
+                      var comision_asignada=montocomisionmerchant; fila1.push(comision_asignada);
+                      var comision_sin_iva=0; fila1.push(comision_sin_iva);
+                      var iva=0; fila1.push(iva);
+                      var comision_con_iva=0; fila1.push(comision_con_iva);
+                      var estadocredito="REVERSADO_AL"; fila1.push(estadocredito);
+                      var fechaemision=fechadeloan; fila1.push(fechaemision);
+                      var fechacancelacion=fechaprepayment; fila1.push(fechacancelacion);
+                      var importe_transferir=total_credito-comision_con_iva; fila1.push(importe_transferir);
+                      var estado_conciliacion=" "; fila1.push(estado_conciliacion);
+                      var dni_end_user=dni; fila1.push(dni_end_user);
+                      var nombre_end_user=nombre; fila1.push(nombre_end_user);
+                      var mail_del_end_user=email; fila1.push(mail_del_end_user);
+                      var monto_total_pago=montoprepago; fila1.push(monto_total_pago);
+                      var monto_capital_pago=capitaleu; fila1.push(monto_capital_pago);
+                      var monto_comision_end_user=comisioneu; fila1.push(monto_comision_end_user);
+                      var monto_impuesto_end_user=taxeu; fila1.push(monto_impuesto_end_user);
+                      nuevo.push(fila1);
+                    }
+                    if(comentario1=="DA_Agregado" || comentario1=="DA_Agregado" ){
+                      var id_liquidacion=" "; fila1.push(id_liquidacion);
+                      var id_liquidacion_detalle=" "; fila1.push(id_liquidacion_detalle);
+                      var fecha_conciliacion=" "; fila1.push(fecha_conciliacion);
+                      var servicio=servicioa; fila1.push(servicio);
+                      var merchant_reference=merchantreference; fila1.push(merchant_reference);
+                      var id_comercio=merchantid; fila1.push(id_comercio);
+                      var id_credito=loanid; fila1.push(id_credito);
+                      var id_transaccion=transactionid; fila1.push(id_transaccion);
+                      var fecha_vencimiento_credito=fvenccredito; fila1.push(fecha_vencimiento_credito);
+                      var loan_reference=referenceloan; fila1.push(loan_reference);
+                      var glosa='ID Compra '+referenceloan+' - '+ncuotas+' cuotas'; fila1.push(glosa);
+                      var moneda="Pen"; fila1.push(moneda);
+                      var total_credito=montocredito*-1; fila1.push(total_credito);
+                      var n_cuotas=ncuotas; fila1.push(n_cuotas);
+                      var comision_asignada=montocomisionmerchant; fila1.push(comision_asignada);
+                      var comision_sin_iva=0; fila1.push(comision_sin_iva);
+                      var iva=0; fila1.push(iva);
+                      var comision_con_iva=0; fila1.push(comision_con_iva);
+                      var estadocredito="REVERSADO_DL"; fila1.push(estadocredito);
+                      var fechaemision=fechadeloan; fila1.push(fechaemision);
+                      var fechacancelacion=fechaprepayment; fila1.push(fechacancelacion);
+                      var importe_transferir=total_credito-comision_con_iva; fila1.push(importe_transferir);
+                      var estado_conciliacion=" "; fila1.push(estado_conciliacion);
+                      var dni_end_user=dni; fila1.push(dni_end_user);
+                      var nombre_end_user=nombre; fila1.push(nombre_end_user);
+                      var mail_del_end_user=email; fila1.push(mail_del_end_user);
+                      var monto_total_pago=montoprepago; fila1.push(monto_total_pago);
+                      var monto_capital_pago=capitaleu; fila1.push(monto_capital_pago);
+                      var monto_comision_end_user=comisioneu; fila1.push(monto_comision_end_user);
+                      var monto_impuesto_end_user=taxeu; fila1.push(monto_impuesto_end_user);
+                      nuevo.push(fila1);
+                    }                     
+                  break;
+                case "Reversa":
+                  break;
+              }          
+          }
+          return nuevo;
+      }
+    //reporte de enduser
+      function generarEU(arregloBidimensional) {
+        // Iterar sobre cada fila del arreglo bidimensional
+          var nuevo=[];
+          for (var i = 0; i < arregloBidimensional.length; i++) {
+            var fila = arregloBidimensional[i];
+            // Obtener el tipo de estado de la columna 5 (índice 4)
+              var tipoEstado = fila[17];   
+
+              var fila1 = [];
+            // Obtener otros valores de la fila y asignarlos a variables
+              var idop = fila[0]; 
+              var loanid = fila[1];
+              //    var merchantid = fila[2]; 
+              var ruc = fila[3]; 
+              var rs = fila[4]; 
+              //    var servicioa = fila[5]; 
+              //    var canal = fila[6]; 
+              var merchantreference = fila[7]; 
+              //    var transactionid = fila[8]; 
+              //    var montocredito = fila[9]; 
+              //    var loanstatus = fila[10];
+              var fechadeloan = fila[11]; 
+              //    var fechacreditocast = fila[12]; 
+              var referenceloan= fila[13]; 
+              var prepaymentid = fila[14]; 
+              var prepaymentreference = fila[15]; 
+              var montoprepago = fila[16];
+              var plancuotas = fila[18]; 
+              var tipo = fila[19]; 
+              //    var fechaprepayment = fila[20]; 
+              var fechapagocast = fila[21]; 
+              //    var fvenccredito= fila[22]; 
+              //    var idusuario= fila[23]; 
+              var dni= fila[24]; 
+              var nombre= fila[25];
+              var email= fila[26]; 
+              //    var comisionmerchant = fila[27]; 
+              //    var taxmerchant = fila[28];  
+              //    var montocomisionmerchant = fila[29];
+              //    var montotaxmerchant = fila[30];
+              //    var comisionopenpay= fila[31]; 
+              //    var taxopenpay = fila[32]; 
+              //    var periodo = fila[33]; 
+              //    var iddevolucion = fila[34];
+              //    var devolucionreference = fila[35];
+              //    var fechadevolucion = fila[36]; 
+              var capitaleu= fila[37]; 
+              var comisioneu = fila[38]; 
+              var taxeu = fila[39]; 
+              //    var ncuotas = fila[40];
+              //    var comentario1 = fila[41];
+              //    var tipoCuota = fila[42]; 
+
+            // comparar
+              var idtransaccionopenpay = idop; fila1.push(idtransaccionopenpay);
+              var idpago = prepaymentid; fila1.push(idpago);
+              var tipopago = tipo;  fila1.push(tipopago);
+              var idprestamo = loanid;  fila1.push(idprestamo);
+              var ncuotasa = plancuotas;  fila1.push(ncuotasa);
+              var fechacredito = fechadeloan;  fila1.push(fechacredito);
+              var ruca = ruc;  fila1.push(ruca);
+              var razonsocial = rs;  fila1.push(razonsocial);
+              var dnia = dni;  fila1.push(dnia);
+              var nombrea = nombre;  fila1.push(nombrea);
+              var correoelectronico = email; fila1.push(correoelectronico);
+              var montopago = montoprepago;  fila1.push(montopago);
+              var ncuotaspagadas = " ";  fila1.push(ncuotaspagadas);
+              var montocapitalcuota= " ";  fila1.push(montocapitalcuota);
+              var montocapital = capitaleu;  fila1.push(montocapital);
+              var montocostoservicio = comisioneu;  fila1.push(montocostoservicio);
+              var montoimpuesto = taxeu; fila1.push(montoimpuesto);
+              var montocobromora = " ";  fila1.push(montocobromora);
+              var montointeresmora = " ";  fila1.push(montointeresmora);
+              var fechapago = fechapagocast;  fila1.push(fechapago);
+              var paymentreference = prepaymentreference;  fila1.push(paymentreference);
+              var loanreferencea= referenceloan;  fila1.push(loanreferencea);
+              var merchantreferencea= merchantreference;  fila1.push(merchantreferencea);
+              var glosa= 'ID de Compra '+referenceloan+' -ID de Pago '+prepaymentreference;  fila1.push(glosa);
+              var obs= tipoEstado;  fila1.push(obs);
+              nuevo.push(fila1); 
+          }
+                  return nuevo;    
+      }
+          
+      
+
+  //funcion para comparar merchant
+    function resultadomer(arreglo1, arreglo2) { 
+      var resultados = [];
+      var fila1 = [];
+      var dif=0.05;
+      for (var i = 0; i < arreglo1.length; i++) {
+        //lave
+          var id_credito = arreglo1[i][6];    	                        
+        //comparaciones
+          var credito; if(arreglo1[i][6]==arreglo2[i][6]){credito ='SI'}else {credito= 'NO'}; 
+          var servicio	; if(arreglo1[i][3]==arreglo2[i][3]){servicio ='SI'}else {servicio= 'NO'};
+          var merchantreference	; if(arreglo1[i][4]==arreglo2[i][4]){merchantreference ='SI'}else {merchantreference= 'NO'};
+          var idcomercio	; if(arreglo1[i][5]==arreglo2[i][5]){idcomercio ='SI'}else {idcomercio= 'NO'};
+          var idtranx	; if(arreglo1[i][7]==arreglo2[i][7]){idtranx ='SI'}else {idtranx= 'NO'};
+          //fecha de vencimiento no se valida
+          var loanreference	; if(arreglo1[i][9]==arreglo2[i][9]){loanreference ='SI'}else {loanreference= 'NO'};
+          var glosa1	; if(arreglo1[i][10]==arreglo2[i][10]){glosa1 ='SI'}else {glosa1= 'NO'};
+          //moneda no se valida
+          var total	; if(Math.abs(arreglo1[i][12]-arreglo2[i][12])<=dif){total ='SI'}else {total= 'NO'};
+          var ncuotas	; if(arreglo1[i][13]==arreglo2[i][13]){ncuotas ='SI'}else {ncuotas= 'NO'};
+          //comision asignada no se valida
+          var comsiniva	; if(Math.abs(arreglo1[i][15]==arreglo2[i][15])<=dif){comsiniva ='SI'}else {comsiniva= 'NO'};
+          var iva1	; if(Math.abs(arreglo1[i][16]==arreglo2[i][16])<=dif){iva1 ='SI'}else {iva1= 'NO'};
+          var comconiva	; if(Math.abs(arreglo1[i][17]==arreglo2[i][17])<=dif){comconiva ='SI'}else {comconiva= 'NO'};
+          var estado	; if(arreglo1[i][18]==arreglo2[i][18]){estado ='SI'}else {estado= 'NO'};
+          //fecha de emision no se valida
+          //fecha de cancelacion no se valida
+          var importetransferir	; if(Math.abs(arreglo1[i][21]==arreglo2[i][21])<=dif){importetransferir ='SI'}else {importetransferir= 'NO'};
+          //estado conciliacion no se valida
+          var dnienduser	; if(arreglo1[i][23]==arreglo2[i][23]){dnienduser ='SI'}else {dnienduser= 'NO'};
+          var nombreenduser	; if(arreglo1[i][24]==arreglo2[i][24]){nombreenduser ='SI'}else {nombreenduser= 'NO'};
+          var maildelenduser	; if(arreglo1[i][25]==arreglo2[i][25]){maildelenduser ='SI'}else {maildelenduser= 'NO'};
+          var totalpago	; if(Math.abs(arreglo1[i][26]==arreglo2[i][26])<=dif){totalpago ='SI'}else {totalpago= 'NO'};
+          var montocapitalpago	; if(Math.abs(arreglo1[i][27]==arreglo2[i][27])<=dif){montocapitalpago ='SI'}else {montocapitalpago= 'NO'};
+          var montocomisioneu	; if(Math.abs(arreglo1[i][28]==arreglo2[i][28])<=dif){montocomisioneu ='SI'}else {montocomisioneu= 'NO'};
+          var montoimpuestoeu	; if(Math.abs(arreglo1[i][29]==arreglo2[i][29])<=dif){montoimpuestoeu ='SI'}else {montoimpuestoeu= 'NO'};
+        //resultado
+          var ok	; if(credito =='SI' && servicio =='SI' && merchantreference =='SI' && idcomercio =='SI' && idtranx =='SI' && loanreference =='SI' && glosa1 =='SI' && total =='SI' && ncuotas =='SI' && comsiniva =='SI' && iva1 =='SI' && comconiva =='SI' && estado =='SI' && importetransferir =='SI' && dnienduser =='SI' && nombreenduser =='SI' && maildelenduser =='SI' && totalpago =='SI' && montocapitalpago =='SI' && montocomisioneu =='SI' && montoimpuestoeu =='SI'  ){ok ='SI'}else {ok= 'NO'};
+        //sondatosdelcredito
+          var nombreservicio=arreglo1[i][3];	
+          var monto	=arreglo1[i][12];
+          var fechacredito=arreglo1[i][20];
+        //almacenar en la fila
+          fila1.push(id_credito);
+          fila1.push(ok);
+          fila1.push(credito);
+          fila1.push(servicio);
+          fila1.push(merchantreference);
+          fila1.push(idcomercio);
+          fila1.push(idtranx);
+          fila1.push(loanreference);
+          fila1.push(glosa1);
+          fila1.push(total);
+          fila1.push(ncuotas);
+          fila1.push(comsiniva);
+          fila1.push(iva1);
+          fila1.push(comconiva);
+          fila1.push(estado);
+          fila1.push(importetransferir);
+          fila1.push(dnienduser);
+          fila1.push(nombreenduser);
+          fila1.push(maildelenduser);
+          fila1.push(totalpago);
+          fila1.push(montocapitalpago);
+          fila1.push(montocomisioneu);
+          fila1.push(montoimpuestoeu);
+          fila1.push(nombreservicio);
+          fila1.push(monto);
+          fila1.push(fechacredito);
+        //almacenar en resultado
+          resultados.push(fila1);         
+      }
+    }
+  //funcion para comparar end user
+    function comparaeu(arreglo1, arreglo2) { 
+      var resultados = [];
+      var fila1 = [];
+      var dif=0.05;
+      for (var i = 0; i < arreglo1.length; i++) {
+        //lave
+          var id_pago = arreglo1[i][1];    	                        
+        //comparaciones
+          var idpago; if(arreglo1[i][1]==arreglo2[i][1]){idpago ='SI'}else {idpago= 'NO'}; 
+          var idtranxop	; if(arreglo1[i][0]==arreglo2[i][0]){idtranxop ='SI'}else {idtranxop= 'NO'};
+          var metodopago	; if(arreglo1[i][2]==arreglo2[i][2]){metodopago ='SI'}else {metodopago= 'NO'};
+          var idprestamo	; if(arreglo1[i][3]==arreglo2[i][3]){idprestamo ='SI'}else {idprestamo= 'NO'};
+          var ncuotas	; if(arreglo1[i][4]==arreglo2[i][4]){ncuotas ='SI'}else {ncuotas= 'NO'};
+          var fechacredito	; if(arreglo1[i][5]==arreglo2[i][5]){fechacredito ='SI'}else {fechacredito= 'NO'};
+          var ruc	; if(arreglo1[i][6]==arreglo2[i][6]){ruc ='SI'}else {ruc= 'NO'};
+          var razonsocial	; if(arreglo1[i][7]==arreglo2[i][7]){razonsocial ='SI'}else {razonsocial= 'NO'};
+          var dni	; if(arreglo1[i][8]==arreglo2[i][8]){dni ='SI'}else {dni= 'NO'};
+          var nombre	; if(arreglo1[i][9]==arreglo2[i][9]){nombre ='SI'}else {nombre= 'NO'};
+          var mail	; if(arreglo1[i][10]==arreglo2[i][10]){mail ='SI'}else {mail= 'NO'};
+          var montopagado	; if(arreglo1[i][11]==arreglo2[i][11]){montopagado ='SI'}else {montopagado= 'NO'};
+          //var ncuotaspagadas	; if(arreglo1[i][18]==arreglo2[i][18]){ncuotaspagadas ='SI'}else {ncuotaspagadas= 'NO'};
+            var ncuotaspagadas="SI"	;
+          //var monto_capitalcuota	; if(arreglo1[i][21]==arreglo2[i][21]){monto_capitalcuota ='SI'}else {monto_capitalcuota= 'NO'};
+            var monto_capitalcuota="SI"	;
+          var montocapital	; if(arreglo1[i][14]==arreglo2[i][14]){montocapital ='SI'}else {montocapital= 'NO'};
+          var montocomision	; if(arreglo1[i][15]==arreglo2[i][15]){montocomision ='SI'}else {montocomision= 'NO'};
+          var montotax	; if(arreglo1[i][16]==arreglo2[i][16]){montotax ='SI'}else {montotax= 'NO'};
+          var montomora	="SI"; //if(arreglo1[i][26]==arreglo2[i][26]){montomora ='SI'}else {montomora= 'NO'};
+          var montotaxmora="SI"	;// if(arreglo1[i][27]==arreglo2[i][27]){montotaxmora ='SI'}else {montotaxmora= 'NO'};
+          var fechapago	; if(arreglo1[i][19]==arreglo2[i][19]){fechapago ='SI'}else {fechapago= 'NO'};
+          var paymentreference	; if(arreglo1[i][20]==arreglo2[i][20]){paymentreference ='SI'}else {paymentreference= 'NO'};
+          var loanreference	; if(arreglo1[i][21]==arreglo2[i][21]){loanreference ='SI'}else {loanreference= 'NO'};
+          var merchantreference	; if(arreglo1[i][22]==arreglo2[i][22]){merchantreference ='SI'}else {merchantreference= 'NO'};
+          var glosa	; if(arreglo1[i][23]==arreglo2[i][23]){glosa ='SI'}else {glosa= 'NO'};
+          var observacion	; if(arreglo1[i][24]==arreglo2[i][24]){observacion ='SI'}else {observacion= 'NO'};
+        //otros datos no se comparan
+          var razonsociala=arreglo1[i][3];
+          var pago= arreglo1[i][3];
+          var fechadepagoa=arreglo1[i][3];
+        //resultado
+          var ok	; if(idpago =='SI' && idtranxop =='SI' && metodopago =='SI' && idprestamo =='SI' && ncuotas =='SI' && fechacredito =='SI' && ruc =='SI' && razonsocial =='SI' && dni =='SI' && nombre =='SI' && mail =='SI' && montopagado =='SI' && montocapital =='SI' && montocomision =='SI' && montotax =='SI' && fechapago =='SI' && paymentreference =='SI' && loanreference =='SI' && merchantreference =='SI' && glosa =='SI' && observacion =='SI') {ok ='SI'}else {ok= 'NO'};
+        //almacenar en la fila
+          fila1.push(id_pago);
+          fila1.push(ok);
+          fila1.push(idpago);
+          fila1.push(idtranxop);
+          fila1.push(metodopago);
+          fila1.push(idprestamo);
+          fila1.push(ncuotas);
+          fila1.push(fechacredito);
+          fila1.push(ruc);
+          fila1.push(razonsocial);
+          fila1.push(dni);
+          fila1.push(nombre);
+          fila1.push(mail);
+          fila1.push(montopagado);
+          fila1.push(ncuotaspagadas);
+          fila1.push(monto_capitalcuota);
+          fila1.push(montocapital);
+          fila1.push(montocomision);
+          fila1.push(montotax);
+          fila1.push(montomora);
+          fila1.push(montotaxmora);
+          fila1.push(fechapago);
+          fila1.push(paymentreference);
+          fila1.push(loanreference);
+          fila1.push(merchantreference);
+          fila1.push(glosa);
+          fila1.push(razonsociala);
+          fila1.push(pago);
+          fila1.push(fechadepagoa);
+          fila1.push(observacion);
+
+        //almacenar en resultado
+          resultados.push(fila1);         
+      }
+    }
+
+//Obtener datos de tranx jefes y el archivo de conciliacion base
+  //Obtener mi lista de tranx jefes filtrar por lo que no fue conciliado, no se debe considera lo de api
+    var datosFiltradosAprobados = [valoresdetTranxJefes[0], ...valoresdetTranxJefes.slice(1).filter(function(fila) {          
+      // Condición 1: filtrar por tipo diferente a openpay
+        var cumpleCondicionValor  = fila[15] == "SI";    
+        var cumpleCondicionConciliado = fila[19] == "NO";    
+        var cumpleCondicionPruebaApi = fila[13] != "API"; 
+      // Comparar la fecha formateada con la fecha de filtro
+        return cumpleCondicionValor && cumpleCondicionConciliado && cumpleCondicionPruebaApi;                  
+    })];
+    valoresdetTranxJefesFiltrados = datosFiltradosAprobados;
+
+    var valoresdetTranxJefesFiltrados = valoresdetTranxJefesFiltrados.map(function(fila) {
+      var vari = fila[13];
+      if (vari == "Link de Pago") {
+          fila[13] = "completed";
+      } else if (vari == "Anulación") {
+          fila[13] = "Anulación";
+      } else if (vari == "Reembolso (Reversión de Pago)") {
+          fila[13] = "Reversa";
+      } else if (vari == "Devolución") {
+          fila[13] = "Devolución";
+      }
+      return fila; // Supongo que la columna adicional está en la columna 20
+    });
+    var valoresdetTranxJefesFiltrados=valoresdetTranxJefesFiltrados.slice(1);
+
+  //Obtener el reporte de conciliacion base
+    var cabecera = valoresDataConci[0]; // Usa la primera fila como cabecera
+    // Obtener los datos sin la cabecera
+      var datosSinCabecera = valoresDataConci.slice(1);
+      datosSinCabecera.sort(function(a, b) {
+        // Comparar los valores alfanuméricos de forma descendente
+        return b[0].localeCompare(a[0]);
+      });
+    // Volver a unir la cabecera con los datos ordenados
+      var valoresDataConci = [cabecera].concat(datosSinCabecera);
+
+  // se debe filtrar por fecha a la data de conciliacion
+    // Primero filtrar el archivo de cociliacion merchant en base a fechas
+      var rangoFechaInicio = fechainicio; // Ajusta la fecha según tus necesidades
+      var rangoFechaFin = fechafin; // Ajusta la fecha según tus necesidades
+      var valoresConcixfechas = filtrarPorFechas(valoresDataConci, 21, rangoFechaInicio, rangoFechaFin);
+    //agregar un comerntario al final de los registros - aqui agrego el tipo de cuota para conciliacion
+      var valoresConcixfechas = [cabecera.concat("Comentario"), ...valoresConcixfechas.slice(1).map(function(fila) {
+        // Obtener las fechas de las columnas existentes
+        var fechaColumna1 = fila[12];
+        var fechaColumna2 = fila[21];
+        
+        // Verificar si las fechas son iguales y asignar 1 o 'n' a la nueva columna
+        var valorNuevaColumna = (fechaColumna1.getTime() === fechaColumna2.getTime()) ? 1 : 'n';
+        // Devolver una nueva fila que incluye la nueva columna
+        return [...fila, valorNuevaColumna];
+      })];
+
+//comparo con tranx jefes y agrego si es que necesito
+  // Obtener los valores de las columnas de jefes
+    var valoresColumnaArreglo1 = valoresdetTranxJefesFiltrados.map(function(fila) {
+      return fila[6]; // Supongo que la columna de interés en arreglo1 es la columna 1
+    }); valoresColumnaArreglo1 = valoresColumnaArreglo1.slice(1);
+  //valores de la columna adicional
+    var valoresColumnaAdicional = valoresdetTranxJefesFiltrados.map(function(fila) {
+      return fila[13]; // Supongo que la columna adicional está en la columna 20
+    }); valoresColumnaAdicional = valoresColumnaAdicional.slice(1);
+  // obtener los valores de las columna de Conciliacion
+
+    var valoresColumnaArreglo2 = valoresConcixfechas.map(function(fila) {
+      return fila[15]; // Supongo que la columna de interés en arreglo2 es la columna 4
+    });valoresColumnaArreglo2 = valoresColumnaArreglo2.slice(1);
+  //encuentro los valores que no coinciden
+    var valoresFiltradosCruce = valoresColumnaArreglo1.filter(function(valor) {
+      return !valoresColumnaArreglo2.includes(valor);
+    });
+    var valoresCoincidentes = valoresColumnaArreglo1.filter(function(valor) {
+      return valoresColumnaArreglo2.includes(valor);
+    });
+
+        var mensajes1 = [];
+  //si hay nuevos valores entonces
+          if (valoresFiltradosCruce.length > 0) {
+            var valoresFiltro = valoresFiltradosCruce.map(function(valor, indice) {
+              return [valor, valoresColumnaAdicional[indice]]; // Agregar el valor adicional correspondiente
+            });
+            var arregloFiltrado = valoresDataConcilimpia.filter(function(fila) {
+                return valoresFiltro.some(function(valores) {
+                    return valores[0] === fila[15]; // Suponiendo que deseas comparar con la primera columna de arreglo2
+                });
+            });
+
+            arregloFiltrado.forEach(function(registro) {
+                // Obtener el valor de la columna adicional correspondiente al valor de la columna de interés
+                var columnaAdicional = valoresColumnaAdicional[valoresColumnaArreglo1.indexOf(registro[15])];
+                // Agregar la columna adicional al registro
+                registro.push('TJ_agregado-'+columnaAdicional);
+            });
+
+            agregarRegistros(valoresConcixfechas, arregloFiltrado);
+
+            mensajes1.push(['Valores agregados del reporte de Tranx Jefes:']); // Envuelve en un array interno
+            mensajes1 = mensajes1.concat(valoresFiltradosCruce.map(function(valor) {
+              return [valor]; // Envuelve cada mensaje en un array interno
+            }));
+          }
+
+  //si hay valores iguales entonces
+    if (valoresCoincidentes.length > 0) {                        
+      var valoresCoincidentes = valoresCoincidentes.map(function(valor, indice) {
+        return [valor, valoresColumnaAdicional[indice]]; 
+      });            
+        valoresCoincidentes.forEach(function(valorArreglo3) {
+        // Encontrar el índice en el arreglo 2 donde el valor de la columna 1 coincide con el valor del arreglo 3
+        var indiceEnArreglo2 = valoresConcixfechas.findIndex(function(fila) {
+          return fila[15] == valorArreglo3[0]; // Suponiendo que la columna de interés en el arreglo 2 es la columna 1
+        });
+        // Verificar si se encontró un índice válido en el arreglo 2
+          if (indiceEnArreglo2 !== -1) {
+                  // Obtener el valor de la columna 3 del arreglo 2
+                    var valorColumna3Arreglo2 = valorArreglo3[1]; // Suponiendo que la columna 3 en el arreglo 2 es la columna 3
+                  // Obtener el valor de la columna 8 del arreglo 2
+                    var valorColumna8Arreglo2 = "TJ-actualizado"; // Suponiendo que la columna 8 en el arreglo 2 es la columna 8
+                    valoresConcixfechas[indiceEnArreglo2][17] = valorColumna3Arreglo2;
+                    valoresConcixfechas[indiceEnArreglo2][40] = valorColumna8Arreglo2;
+          }
+      });
+        mensajes1.push(['Valores actualizados segun el reporte de Tranx Jefes:']); // Envuelve en un array interno
+        mensajes1 = mensajes1.concat(valoresCoincidentes.map(function(valor) {
+          return [valor]; // Envuelve cada mensaje en un array interno
+        }));
+      var hojaMensajes = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Comentarios');
+      hojaMensajes.getRange(1, 1, mensajes1.length, mensajes1[0].length).setValues(mensajes1);
+    }
+
+
+
+//Realizar la comparacion con los registros de OP
+  //Cargar el archivo de OP y limpiarlo
+    //actualizar los estado a devolucion
+      for (var i = 1; i < valoresdetOP.length; i++) {
+        var valorColumna6 = valoresdetOP[i][5];
+        var valorColumna8 = valoresdetOP[i][7];
+        // Verificar el valor de la columna 5
+        if (valorColumna6 === 'completed' && valorColumna8 === 'true') {
+          // Actualizar el valor de la columna 3 a 'Devuelto' solo si no es 'Devuelto' actualmente
+          valoresdetOP[i][5] = 'Devolución'; // Columna 3 en JavaScript, índices basados en 0
+        }
+        if (valorColumna6 === 'completed' && valorColumna8 === 'TRUE') {
+          // Actualizar el valor de la columna 3 a 'Devuelto' solo si no es 'Devuelto' actualmente
+          valoresdetOP[i][5] = 'Devolución'; // Columna 3 en JavaScript, índices basados en 0
+        }
+        if (valorColumna6 === 'completed' && valorColumna8 === 'VERDADERO') {
+          // Actualizar el valor de la columna 3 a 'Devuelto' solo si no es 'Devuelto' actualmente
+          valoresdetOP[i][5] = 'Devolución'; // Columna 3 en JavaScript, índices basados en 0
+        }
+        // Si el valor de la columna 5 es false o la columna 3 ya es 'Devuelto', no se hace nada
+      }
+
+    //order la hoja de OP
+       var cabecera1 = valoresdetOP[0]; // Usa la primera fila como cabecera
+       // Obtener los datos sin la cabecera
+       var datosSinCabecera1 = valoresdetOP.slice(1);
+       datosSinCabecera1.sort(function(a, b) {
+         // Comparar los valores alfanuméricos de forma descendente
+         return b[0].localeCompare(a[0]);
+       });
+       // Volver a unir la cabecera con los datos ordenados
+       var valoresdetOP = [cabecera1].concat(datosSinCabecera1);
+
+    //filtrar solo los completados y devueltos
+      var datosFiltradosAprobados = [valoresdetOP[0], ...valoresdetOP.slice(1).filter(function(fila) {          
+      // Condición 1: filtrar por tipo diferente a openpay
+      var cumpleCondicionValor  = fila[5] == "completed"; 
+      // Condición 2: filtrar solo los que no tienen refund
+      var cumpleCondicionDevol  = fila[5] == "Devolución";      
+      // Comparar la fecha formateada con la fecha de filtro
+      return cumpleCondicionValor || cumpleCondicionDevol;                  
+      })];
+      /////ultimo cambio
+      valoresdetOPvalidos = datosFiltradosAprobados.slice(1);
+
+  // Iniciar con la comparacion con la base
+    var mensajes4 = [];
+    //comparacion con la base 
+      var resultados = compararListaOP(valoresdetOPvalidos, valoresConcixfechas, mensajes4);
+      var valoresConcixfechas = resultados[0];
+      var mensajes4 = resultados[1];
+      var sinvaloresOP = resultados[2];
+      
+var hojaResultado = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('aaa') || SpreadsheetApp.getActiveSpreadsheet().insertSheet('aaa');
+hojaResultado.getRange(1, 1, valoresConcixfechas.length, valoresConcixfechas[0].length).setValues(valoresConcixfechas);
+
+
+
+    //comparacion con los if para mostrar el resultado
+      if (mensajes4.length > 0) {  
+        var hojaMensajes = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Comentarios');
+        hojaMensajes.getRange(1, 10, mensajes4.length, mensajes4[0].length).setValues(mensajes4);
+      }
+
+//actualizar segun informacion del da
+  //Obtener las 4 listas que se deben filtrar y comparar 
+    //lista 1 es: anulaciones de integraciones
+      var datosDavalidos1 = [valoresdetDA[0], ...valoresdetDA.slice(1).filter(function(fila) {          
+        var cumpleCondiciongestor1  = fila[3] == "INTEGRACIONES"; 
+        var cumpleCondicionTipo1  = fila[2] == "ANULACIÓN";  
+        var cumpleCondicionConciliado1 = fila[37] == "NO";     
+        // Comparar la fecha formateada con la fecha de filtro
+        return cumpleCondiciongestor1 && cumpleCondicionTipo1 && cumpleCondicionConciliado1;                  
+      })];
+      valoresdetDALista1 = datosDavalidos1;
+    //lista 2 es: anulaciones de gabriela 
+      var datosDavalidos2 = [valoresdetDA[0], ...valoresdetDA.slice(1).filter(function(fila) {          
+        var cumpleCondiciongestor1  = fila[3] !== "INTEGRACIONES";
+        var cumpleCondicionTipo1  = fila[2] == "ANULACIÓN";  
+        var cumpleCondicionConciliado1 = fila[37] == "NO";     
+        // Comparar la fecha formateada con la fecha de filtro
+        return cumpleCondiciongestor1 && cumpleCondicionTipo1 && cumpleCondicionConciliado1;                  
+      })];
+      valoresdetDALista2 = datosDavalidos2;
+
+
+    //lista 3 es: devoluciones de gabriela con debito
+      var datosDavalidos3 = [valoresdetDA[0], ...valoresdetDA.slice(1).filter(function(fila) {          
+        var cumpleCondiciongestor1  = fila[3] != "INTEGRACIONES";  
+        var cumpleCondicionTipo1  = fila[2] == "DEVOLUCIÓN";  
+        var cumpleCondicionTipoabono  = fila[33] == "DEBITO-LIQUIDACIÓN";  
+        var cumpleCondicionConciliado1 = fila[37] == "NO";     
+        // Comparar la fecha formateada con la fecha de filtro
+        return cumpleCondiciongestor1 && cumpleCondicionTipo1 && cumpleCondicionTipoabono && cumpleCondicionConciliado1;                  
+      })];
+      valoresdetDALista3 = datosDavalidos3;
+
+    //lista 4 es: devoluciones de gabriela con abono en de dinero
+      var datosDavalidos4 = [valoresdetDA[0], ...valoresdetDA.slice(1).filter(function(fila) {          
+        var cumpleCondiciongestor1  = fila[3] != "INTEGRACIONES";  
+        var cumpleCondicionTipo1  = fila[2] == "DEVOLUCIÓN";  
+        var cumpleCondicionTipoabono  = fila[33] == "ABONO A PPAY"; 
+        var cumpleCondicionabonado  = fila[35] == "SI";            
+        var cumpleCondicionConciliado1 = fila[37] == "NO";     
+        // Comparar la fecha formateada con la fecha de filtro
+        return cumpleCondiciongestor1 && cumpleCondicionTipo1 && cumpleCondicionTipoabono && cumpleCondicionabonado &&cumpleCondicionConciliado1;                  
+      })];
+      valoresdetDALista4 = datosDavalidos4;
+      var porabonar = valoresdetDALista4.map(function(fila) {
+        return fila[5]; // Columna 19 (el índice es 18 porque los índices comienzan desde 0)
+      });
+      porabonar=porabonar.slice(1);
+
+
+  // Iniciar con la comparacion de cada lista del DA
+    var mensajes2 = [];
+    //comparacion de la lista 1  
+      var resultados = compararListada(valoresdetDALista1, valoresDataConcilimpia, valoresConcixfechas, mensajes2,1);
+      var valoresConcixfechas = resultados[0];
+      var mensajes2 = resultados[1];
+
+
+
+
+    //comparacion de la lista 2
+      var resultados = compararListada(valoresdetDALista2, valoresDataConcilimpia, valoresConcixfechas, mensajes2,2);
+      var valoresConcixfechas = resultados[0];
+      var mensajes2 = resultados[1];
+    //comparacion de la lista 3
+      var resultados = compararListada(valoresdetDALista3, valoresDataConcilimpia, valoresConcixfechas, mensajes2,3);
+      var valoresConcixfechas = resultados[0];
+      var mensajes2 = resultados[1];
+    //comparacion de la lista 4
+      var resultados = compararListada(valoresdetDALista4, valoresDataConcilimpia, valoresConcixfechas, mensajes2,4);
+      var valoresConcixfechas = resultados[0];
+      var mensajes2 = resultados[1];
+    if (mensajes2.length > 0) {   
+    var hojaMensajes = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Comentarios');
+    hojaMensajes.getRange(1, 4, mensajes2.length, mensajes2[0].length).setValues(mensajes2);
+    }
+
+//actualizar segun informacion del rc
+  //Obtener la lista que se deben filtrar y comparar 
+    //lista 1 es: todos los casos no conciliacion
+      var datosDavalidos1 = [valoresdetRC[0], ...valoresdetRC.slice(1).filter(function(fila) {          
+        var cumpleCondicionConciliado1 = fila[28] == "NO";     
+        // Comparar la fecha formateada con la fecha de filtro
+        return cumpleCondicionConciliado1;                  
+      })];
+      valoresdetRCLista1 = datosDavalidos1;  
+  // Iniciar con la comparacion con RC
+    var mensajes3 = [];
+    //comparacion de la lista 1  
+      var resultados1 = compararListadrc(valoresdetRCLista1, valoresDataConcilimpia, valoresConcixfechas, mensajes3);
+      var valoresConcixfechas = resultados1[0];
+      var mensajes3 = resultados1[1];
+
+    if (mensajes3.length > 0) {   
+      var hojaMensajes = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Comentarios');
+      hojaMensajes.getRange(1, 7, mensajes3.length, mensajes3[0].length).setValues(mensajes3);
+    }
+
+
+
+//a la base final se le agrega una nueva columna tipo, esto sirve para saber si todo es cuota 1 o N
+  var nuevaCabecera = "TipoCuota";
+  // Agregar la nueva columna a cada fila del arreglo
+    var arregloConNuevaColumna = valoresConcixfechas.map(function(fila, indice) {
+      // En la primera fila (cabecera), agregamos el nombre de la nueva columna
+      if (indice === 0) {
+          return fila.concat(nuevaCabecera);
+      } else {
+          // En las filas restantes, agregamos un valor vacío para la nueva columna
+          return fila.concat("");
+      }
+    });
+
+
+  //categorizar
+    arregloConNuevaColumna.forEach(function(fila, indice) {
+      // Ignorar la primera fila (cabecera)
+      if (indice !== 0) {
+        // Obtener los valores de las columnas 7 y 8
+        var valorColumna7 = fila[12]; // Columna 7 (índice 6)
+        var valorColumna8 = fila[21]; // Columna 8 (índice 7)
+
+        var valorNuevaColumna = (valorColumna7.getTime() === valorColumna8.getTime()) ? 1 : 'n';
+        fila[42]=valorNuevaColumna;
+        // Verificar las condiciones y actualizar la columna 43
+          //      if (valorColumna7 === valorColumna8) {
+          //        fila[42] = 1; // Si las columnas 7 y 8 son iguales, asignar 1
+          //      } else {
+          //        fila[42] = "N"; // Si las columnas 7 y 8 son diferentes, asignar "a"
+          //      }
+      }
+    });
+  var basefinal=arregloConNuevaColumna;
+
+// armar la lista de comparacion segun los tipos, 
+  //lista para merchant
+    //filtrar solo por las primeras compras
+      var valoresMerchant = [basefinal[0], ...basefinal.slice(1).filter(function(fila) {          
+        // Condición 1: filtrar por tipo diferente a openpay
+          var cumpleCondicionValor  = fila[42] == 1; 
+        // Comparar la fecha formateada con la fecha de filtro
+          return cumpleCondicionValor;                  
+      })];
+ var valoresMerchant=valoresMerchant[1]
+
+//var hojaResultado = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('aaa') || SpreadsheetApp.getActiveSpreadsheet().insertSheet('aaa');
+//hojaResultado.getRange(1, 1, valoresMerchant.length, valoresMerchant[0].length).setValues(valoresMerchant);
+
+      //var cabeceram = valoresMerchant[0]; // Usa la primera fila como cabecera
+      //quitar la cabecera para copararlo
+      var datosmSinCabecera = valoresMerchant.slice(1);
+      //generar el reporte
+      var reportemerch=  generarMerch(datosmSinCabecera);
+
+
+
+    //actualizar el registro de abono
+      porabonar.forEach(function(valor) {
+      // Encontrar la fila en el arreglo 1 que coincide con el valor en la columna 15
+        var indice = reportemerch.findIndex(function(fila) {
+          return fila[6] === valor; // Se compara con el valor en la columna 15 (índice 14)
+        });
+
+      // Si se encuentra la fila en el arreglo 1
+        if (indice !== -1) {
+          // Actualizar el valor de la columna 20 a 0
+          reportemerch[indice][21] = 0; // Columna 20 (índice 19)
+        }
+      });
+    //agregar la cabecera
+        //var reportemerch = [cabeceram].concat(reportemerch);
+
+
+
+  //lista para end user
+    valoresEnduser=basefinal;
+        var cabeceraeu = valoresEnduser[0]; // Usa la primera fila como cabecera
+      //quitar la cabecera para copararlo
+        var datoseuSinCabecera = valoresEnduser.slice(1);
+      //generar el reporte
+
+
+
+        var reporteEU=  generarEU(datoseuSinCabecera);
+      //agregar la cabecera
+        //var reporteEU = [cabeceraeu].concat(reporteEU);
+
+
+
+//compara con lo que ingresa
+  //ordenar reporte de merchant calculado y el de la hoja ingresada
+    //ordenar la hoja calculada
+      reporteEU.sort(function(a, b) { //REVISAR MARLON
+        // Ordenar por la tercera columna (primaria) de mayor a menor
+          if (a[6] < b[6]) return 1;
+          if (a[6] > b[6]) return -1;
+        // Si las terceras columnas son iguales, ordenar por la decimoquinta columna (secundaria) de mayor a menor
+          if (a[12] < b[12]) return 1;
+          if (a[12] > b[12]) return -1;
+        // Si ambas columnas son iguales, no se cambia el orden
+        return 0;
+      });
+    //reporte ingresado
+      //quitar cabecera
+        var rm=valoresDetalleMerchant.slice(1);
+      //
+      rm.sort(function(a, b) {
+        // Ordenar por la tercera columna (primaria) de mayor a menor
+          if (a[6] < b[6]) return 1;
+          if (a[6] > b[6]) return -1;
+        // Si las terceras columnas son iguales, ordenar por la decimoquinta columna (secundaria) de mayor a menor
+          if (a[12] < b[12]) return 1;
+          if (a[12] > b[12]) return -1;
+        // Si ambas columnas son iguales, no se cambia el orden
+        return 0;
+      });
+
+  //ordernar el reporte de end user
+    //reporte calculado
+
+      reporteEU.sort(function(a, b) {
+        // Ordenar por la tercera columna (primaria) de mayor a menor
+          if (a[1] < b[1]) return 1;
+          if (a[1] > b[1]) return -1;
+        return 0;
+      });    
+    //reporte ingresado
+      //quitar cabecera
+        var euok=valoresDetalleUsuarioval.slice(1);
+        var euob=valoresDetalleUsuarioobs.slice(1);
+        var eu=euok.concat(euob);
+
+      //ordenar
+        eu.sort(function(a, b) {
+          // Ordenar por la tercera columna (primaria) de mayor a menor
+          if (a[1] < b[1]) return 1;
+          if (a[1] > b[1]) return -1;
+          return 0;
+        });
+  //compara los reportes
+    //comparar reportes de merhant y dar resultado
+      //comparar y guardar en arreglos
+
+
+        var comparamer=resultadomer(reportemerch,rm);
+      //pintar en hoja especifica
+
+
+        //var hojaResultado = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Resultado Merchant') || SpreadsheetApp.getActiveSpreadsheet().insertSheet('Resultado  Merchant');
+        //hojaResultado.getRange(2, 1, comparamer.length, comparamer[0].length).setValues(comparamer);
+    //comparar reportes de end user y dar resultado
+      //comparar y guardar en arreglos
+        var comparaeu=comparaeu(reporteEU,eu);
+      //pintar en hoja especifica
+        //var hojaResultado = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Resultado Merchant') || SpreadsheetApp.getActiveSpreadsheet().insertSheet('Resultado  Merchant');
+        //hojaResultado.getRange(2, 1, comparaeu.length, comparaeu[0].length).setValues(comparaeu);
+    
+}  
+  
+
+
+
+
+
+
+
+
+
+
+
+
